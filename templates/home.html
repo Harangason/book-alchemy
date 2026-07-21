@@ -40,6 +40,7 @@
                     <img src="{{ book.cover_url }}" alt="Cover for {{ book.title }}" width="100">
                     <h2>{{ book.title }}</h2>
                     <p>Author: {{ book.author_name }}</p>
+                    <a href="{{ url_for('edit_book', book_id=book.id) }}">Buch bearbeiten</a>
                     <form method="post" action="{{ url_for('delete_book', book_id=book.id) }}">
                         <button type="submit">Buch löschen</button>
                     </form>

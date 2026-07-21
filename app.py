@@ -100,6 +100,35 @@ def delete_book(book_id):
     return redirect(url_for('home'))
 
 
+@app.route('/book/<int:book_id>/edit', methods=['GET', 'POST'])
+def edit_book(book_id):
+    book = Book.query.get_or_404(book_id)
+    authors = Author.query.order_by(Author.name).all()
+
+    if request.method == 'POST':
+        old_author = book.author
+        old_author_id = book.author_id
+
+        book.isbn = request.form['isbn']
+        book.title = request.form['title']
+        book.date_published = parse_optional_date(request.form.get('date_published'))
+        book.author_id = int(request.form['author_id'])
+
+        if old_author and old_author_id != book.author_id:
+            old_author_has_books = Book.query.filter(
+                Book.author_id == old_author.id,
+                Book.id != book.id,
+            ).count() > 0
+            if not old_author_has_books:
+                db.session.delete(old_author)
+
+        db.session.commit()
+        flash(f"Book '{book.title}' was updated successfully.")
+        return redirect(url_for('edit_book', book_id=book.id))
+
+    return render_template('edit_book.html', book=book, authors=authors)
+
+
 @app.route('/add_author', methods=['GET', 'POST'])
 def add_author():
     success_message = None
