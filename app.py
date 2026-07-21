@@ -1,0 +1,139 @@
+from datetime import date
+
+from flask import Flask, flash, redirect, render_template, request, url_for
+import os
+from sqlalchemy import inspect
+
+from data.data_models import Author, Book, db
+
+
+app = Flask(__name__)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(BASE_DIR, 'data/library.sqlite')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'dev'
+
+db.init_app(app)
+
+
+def check_tables():
+    with app.app_context():
+        if app.config.get('TESTING', False):
+            db.drop_all()
+            return False
+
+        inspector = inspect(db.engine)
+        tables_are_missing = any(
+            not inspector.has_table(table.name)
+            for table in db.metadata.sorted_tables
+        )
+
+        if tables_are_missing:
+            db.create_all()
+            return True
+
+        return False
+
+
+check_tables()
+
+
+def parse_optional_date(value):
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
+def get_cover_url(isbn):
+    return f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
+
+
+@app.route('/')
+def home():
+    sort_by = request.args.get('sort', 'title')
+    search_query = request.args.get('q', '').strip()
+    query = Book.query
+
+    if search_query:
+        query = query.filter(Book.title.like(f"%{search_query}%"))
+
+    if sort_by == 'author':
+        books = query.join(Author).order_by(Author.name, Book.title).all()
+    else:
+        sort_by = 'title'
+        books = query.order_by(Book.title).all()
+
+    book_data = [
+        {
+            'id': book.id,
+            'title': book.title,
+            'author_name': book.author.name if book.author else 'Unknown author',
+            'cover_url': get_cover_url(book.isbn),
+        }
+        for book in books
+    ]
+    return render_template(
+        'home.html',
+        books=book_data,
+        sort_by=sort_by,
+        search_query=search_query,
+    )
+
+
+@app.route('/book/<int:book_id>/delete', methods=['POST'])
+def delete_book(book_id):
+    book = Book.query.get_or_404(book_id)
+    author = book.author
+    title = book.title
+    author_has_other_books = (
+        author
+        and Book.query.filter(Book.author_id == author.id, Book.id != book.id).count() > 0
+    )
+
+    db.session.delete(book)
+
+    if author and not author_has_other_books:
+        db.session.delete(author)
+
+    db.session.commit()
+    flash(f"Book '{title}' was deleted successfully.")
+    return redirect(url_for('home'))
+
+
+@app.route('/add_author', methods=['GET', 'POST'])
+def add_author():
+    success_message = None
+
+    if request.method == 'POST':
+        author = Author(
+            name=request.form['name'],
+            birth_date=parse_optional_date(request.form.get('birth_date')),
+            date_of_death=parse_optional_date(request.form.get('date_of_death')),
+        )
+        db.session.add(author)
+        db.session.commit()
+        success_message = f"Author '{author.name}' was added successfully."
+
+    return render_template('add_author.html', success_message=success_message)
+
+@app.route('/add_book', methods=['GET', 'POST'])
+def add_book():
+    success_message = None
+    authors = Author.query.order_by(Author.name).all()
+
+    if request.method == 'POST':
+        book = Book(
+            isbn=request.form['isbn'],
+            title=request.form['title'],
+            date_published=parse_optional_date(request.form.get('date_published')),
+            author_id=int(request.form['author_id']),
+        )
+        db.session.add(book)
+        db.session.commit()
+        success_message = f"Book '{book.title}' was added successfully."
+
+    return render_template(
+        'add_book.html',
+        authors=authors,
+        success_message=success_message,
+    )
