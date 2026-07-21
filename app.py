@@ -1,9 +1,13 @@
 from datetime import date
+import json
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 import os
 from sqlalchemy import inspect
 from sqlalchemy.sql import text
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from data.data_models import Author, Book, db
 
@@ -13,6 +17,8 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(BASE_DIR, 'data/library.sqlite')}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'dev'
+app.config['RAPIDAPI_HOST'] = 'language-complexity-layering.p.rapidapi.com'
+app.config['RAPIDAPI_URL'] = 'https://language-complexity-layering.p.rapidapi.com/api/language-complexity-layering'
 
 db.init_app(app)
 
@@ -44,6 +50,25 @@ def check_tables():
 check_tables()
 
 
+def load_local_env():
+    for filename in ('.env.local', '.env'):
+        path = os.path.join(BASE_DIR, filename)
+        if not os.path.exists(path):
+            continue
+
+        with open(path, encoding='utf-8') as env_file:
+            for line in env_file:
+                clean_line = line.strip()
+                if not clean_line or clean_line.startswith('#') or '=' not in clean_line:
+                    continue
+
+                key, value = clean_line.split('=', 1)
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_local_env()
+
+
 def parse_optional_date(value):
     if not value:
         return None
@@ -62,6 +87,74 @@ def parse_optional_rating(value):
     if rating < 1 or rating > 10:
         raise ValueError("Rating must be between 1 and 10.")
     return rating
+
+
+def build_library_prompt():
+    books = Book.query.join(Author).order_by(Author.name, Book.title).all()
+    if not books:
+        return ""
+
+    book_lines = []
+    for book in books:
+        rating = book.rating if book.rating else "not rated"
+        book_lines.append(f"- {book.title} by {book.author.name}; rating: {rating}/10")
+
+    return (
+        "Based on this fantasy library, recommend one next book to read. "
+        "Use the ratings if available and explain the recommendation briefly.\n\n"
+        + "\n".join(book_lines)
+    )
+
+
+def parse_rapidapi_response(response_body):
+    try:
+        payload = json.loads(response_body)
+    except json.JSONDecodeError:
+        return response_body
+
+    if isinstance(payload, dict):
+        for key in ('recommendation', 'result', 'text', 'data', 'message'):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        return json.dumps(payload, indent=2, ensure_ascii=False)
+
+    return str(payload)
+
+
+def get_book_recommendation():
+    api_key = os.environ.get('RAPIDAPI_KEY')
+    if not api_key:
+        return None, "RAPIDAPI_KEY is missing. Add it to .env.local or your environment."
+
+    library_prompt = build_library_prompt()
+    if not library_prompt:
+        return None, "No books found. Add books before requesting a recommendation."
+
+    request_data = urlencode({
+        'data': library_prompt,
+        'version': os.environ.get('RAPIDAPI_VERSION', ''),
+    }).encode('utf-8')
+    api_request = Request(
+        app.config['RAPIDAPI_URL'],
+        data=request_data,
+        headers={
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'x-rapidapi-host': app.config['RAPIDAPI_HOST'],
+            'x-rapidapi-key': api_key,
+        },
+        method='POST',
+    )
+
+    try:
+        with urlopen(api_request, timeout=20) as response:
+            response_body = response.read().decode('utf-8')
+    except HTTPError as error:
+        return None, f"RapidAPI request failed with status {error.code}."
+    except URLError:
+        return None, "RapidAPI request failed because the API could not be reached."
+
+    return parse_rapidapi_response(response_body), None
 
 
 @app.route('/')
@@ -124,6 +217,21 @@ def delete_author(author_id):
     db.session.commit()
     flash(f"Author '{author_name}' and their books were deleted successfully.")
     return redirect(url_for('home'))
+
+
+@app.route('/recommendation', methods=['GET', 'POST'])
+def recommendation():
+    recommendation_text = None
+    error_message = None
+
+    if request.method == 'POST':
+        recommendation_text, error_message = get_book_recommendation()
+
+    return render_template(
+        'recommendation.html',
+        recommendation_text=recommendation_text,
+        error_message=error_message,
+    )
 
 
 @app.route('/book/<int:book_id>/delete', methods=['POST'])

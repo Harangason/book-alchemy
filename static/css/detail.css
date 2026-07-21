@@ -27,3 +27,10 @@ form {
 a {
     color: #1d4ed8;
 }
+
+pre {
+    white-space: pre-wrap;
+    padding: 16px;
+    background: white;
+    border-radius: 8px;
+}

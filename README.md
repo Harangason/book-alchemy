@@ -68,4 +68,16 @@ If the app is run from an IDE, use `app.py` as the Flask entry file.
 
 - The local SQLite database is stored at `data/library.sqlite`.
 - Runtime/cache files and local database files are ignored by Git.
-- AI book recommendation is not implemented yet; it requires explicit API-key approval before adding live API code.
+- Book recommendation uses RapidAPI via the RAPIDAPI_KEY environment variable. Do not commit API keys.
+
+## RapidAPI Recommendation
+
+The recommendation page is available at `/recommendation`.
+
+Set the key outside Git before generating recommendations:
+
+```powershell
+$env:RAPIDAPI_KEY = "your-key"
+```
+
+Alternatively, create an ignored `.env.local` file with `RAPIDAPI_KEY=...`.

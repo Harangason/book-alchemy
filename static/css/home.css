@@ -11,6 +11,16 @@ h1 {
     margin-bottom: 24px;
 }
 
+nav {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+nav a {
+    color: #5f3b20;
+}
+
 form {
     display: flex;
     gap: 12px;
