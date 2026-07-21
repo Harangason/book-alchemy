@@ -3,6 +3,7 @@ from datetime import date
 from flask import Flask, flash, redirect, render_template, request, url_for
 import os
 from sqlalchemy import inspect
+from sqlalchemy.sql import text
 
 from data.data_models import Author, Book, db
 
@@ -32,6 +33,11 @@ def check_tables():
             db.create_all()
             return True
 
+        book_columns = [column['name'] for column in inspector.get_columns('book')]
+        if 'rating' not in book_columns:
+            db.session.execute(text('ALTER TABLE book ADD COLUMN rating INTEGER'))
+            db.session.commit()
+
         return False
 
 
@@ -46,6 +52,16 @@ def parse_optional_date(value):
 
 def get_cover_url(isbn):
     return f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
+
+
+def parse_optional_rating(value):
+    if not value:
+        return None
+
+    rating = int(value)
+    if rating < 1 or rating > 10:
+        raise ValueError("Rating must be between 1 and 10.")
+    return rating
 
 
 @app.route('/')
@@ -67,8 +83,10 @@ def home():
         {
             'id': book.id,
             'title': book.title,
+            'author_id': book.author.id if book.author else None,
             'author_name': book.author.name if book.author else 'Unknown author',
             'cover_url': get_cover_url(book.isbn),
+            'rating': book.rating,
         }
         for book in books
     ]
@@ -78,6 +96,34 @@ def home():
         sort_by=sort_by,
         search_query=search_query,
     )
+
+
+@app.route('/book/<int:book_id>')
+def book_detail(book_id):
+    book = Book.query.get_or_404(book_id)
+    return render_template(
+        'book_detail.html',
+        book=book,
+        cover_url=get_cover_url(book.isbn),
+    )
+
+
+@app.route('/author/<int:author_id>')
+def author_detail(author_id):
+    author = Author.query.get_or_404(author_id)
+    books = Book.query.filter_by(author_id=author.id).order_by(Book.title).all()
+    return render_template('author_detail.html', author=author, books=books)
+
+
+@app.route('/author/<int:author_id>/delete', methods=['POST'])
+def delete_author(author_id):
+    author = Author.query.get_or_404(author_id)
+    author_name = author.name
+
+    db.session.delete(author)
+    db.session.commit()
+    flash(f"Author '{author_name}' and their books were deleted successfully.")
+    return redirect(url_for('home'))
 
 
 @app.route('/book/<int:book_id>/delete', methods=['POST'])
@@ -112,6 +158,7 @@ def edit_book(book_id):
         book.isbn = request.form['isbn']
         book.title = request.form['title']
         book.date_published = parse_optional_date(request.form.get('date_published'))
+        book.rating = parse_optional_rating(request.form.get('rating'))
         book.author_id = int(request.form['author_id'])
 
         if old_author and old_author_id != book.author_id:
@@ -155,6 +202,7 @@ def add_book():
             isbn=request.form['isbn'],
             title=request.form['title'],
             date_published=parse_optional_date(request.form.get('date_published')),
+            rating=parse_optional_rating(request.form.get('rating')),
             author_id=int(request.form['author_id']),
         )
         db.session.add(book)

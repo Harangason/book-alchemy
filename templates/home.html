@@ -38,8 +38,21 @@
             {% for book in books %}
                 <li>
                     <img src="{{ book.cover_url }}" alt="Cover for {{ book.title }}" width="100">
-                    <h2>{{ book.title }}</h2>
-                    <p>Author: {{ book.author_name }}</p>
+                    <h2><a href="{{ url_for('book_detail', book_id=book.id) }}">{{ book.title }}</a></h2>
+                    <p>
+                        Author:
+                        {% if book.author_id %}
+                            <a href="{{ url_for('author_detail', author_id=book.author_id) }}">{{ book.author_name }}</a>
+                        {% else %}
+                            {{ book.author_name }}
+                        {% endif %}
+                    </p>
+                    <p>Rating: {{ book.rating if book.rating else 'Not rated' }}</p>
+                    {% if book.author_id %}
+                        <form method="post" action="{{ url_for('delete_author', author_id=book.author_id) }}">
+                            <button type="submit">Autor löschen</button>
+                        </form>
+                    {% endif %}
                     <a href="{{ url_for('edit_book', book_id=book.id) }}">Buch bearbeiten</a>
                     <form method="post" action="{{ url_for('delete_book', book_id=book.id) }}">
                         <button type="submit">Buch löschen</button>
